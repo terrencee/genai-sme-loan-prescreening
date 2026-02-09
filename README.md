@@ -124,3 +124,22 @@ This gives us
 > " who saw what "
 > helps in gov narrative.
 
+
+
+# Local Execution
+
+This prototype req local llm inference and is not yet designed to run on free cloud hosting platforms.
+
+## Pre-requisites :
+
+python 3.10+
+Ollama intalled locally
+Llama 3.2 model pulled via Ollama
+
+###Setup
+
+```bash
+pip install -r requirements.txt
+ollama pull llama3.2:latest
+streamlit run app.py
+

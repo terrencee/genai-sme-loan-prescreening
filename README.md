@@ -1,145 +1,283 @@
-# GenAI assissted Small and Medium Enterprise Pre Screening ( Prototype)
+# Policy-Aware SME Loan Pre-Screening (NSWS-Style Prototype)
 
-*We use the LLM to extract facts from borrower documents, then use RAG to retrieve the relevant policy clauses from ChromaDB, and finally generate a policy-grounded risk rationale and memo with a human escalation gate and audit logging.*
+A GenAI-powered decision-support system designed to reduce the time
+spent reading complex and evolving policy documents during SME loan or
+project pre-screening.
 
-This rep containts a **locally run GenAI prototype** for SME losan pre screening designed for an academic/pilot setting.
+This prototype demonstrates how:
 
-**Sources of knowledge/ Docs being uploaded**
+-   Large Language Models (LLMs) can structure unstructured borrower
+    documents
+-   Layered Retrieval-Augmented Generation (RAG) can ground reasoning in
+    versioned policy rules
+-   Human-in-the-loop governance ensures safe escalation
+-   Audit logging supports regulatory traceability
 
-**A.  Policy Knowledge**
+**Note:** This is an academic / pilot prototype. It is not
+production-grade credit software.
 
-> SME credit policy, documentation rules, ecalation thresholds
-> This does not change per borrower.
-> Treated as a source o Truth.
+------------------------------------------------------------------------
 
-**B. Borrower case documents**
+## Problem Statement
 
+Credit analysts and policy reviewers spend significant time:
 
-> Bank statement summaries, gst, financial summaries.
-> These change per case
-> They are used to extract flags and compute flags
+-   Reading long and complex policy documents
+-   Tracking state-specific rule changes
+-   Reconciling borrower financials against thresholds
+-   Checking sector-specific or environmental conditions
+-   Identifying escalation triggers
 
-**These are the two kinds of docs we upload**
+In regulatory environments (for example, single-window or state policy
+systems), rules:
 
-**Stepwise Pipeline**
+-   Differ by state
+-   Differ by sector
+-   Change frequently
+-   Require version tracking and governance
 
-*Step 0*
+This system demonstrates how to:
 
-policy pdf is uploaded in the sidebar.
-raw text is extracted from pdf.
+-   Separate policy knowledge from borrower data
+-   Automatically retrieve only relevant rules
+-   Ground reasoning in cited policy clauses
+-   Preserve human authority over final decisions
 
-**chunking** ( RAGStore._chunk)
+------------------------------------------------------------------------
 
-Policy text is broken into overlapping chunks
+## System Architecture Overview
 
-   > A single huge policy doc wont reliably fit in context.
-   > Retrieval works better at chunk level.
+The system follows a layered policy + LLM reasoning pipeline.
 
-**Embedding**
+------------------------------------------------------------------------
 
-  > Each chunk becomes a vector representing meaning.
-  > These are stored in ChromaDB ( Vector DB )
-      > chunk text
-      > embedding vector
-      > chunk id
+## 1. Policy Knowledge (Layered RAG)
 
-*Policy can now be searched by semantic similarity*
-**ChromaDB** > memory index enabling retrieval. Not thinking involved. Only store and search of embeddings.
+Policy documents are uploaded via the sidebar and categorized by:
 
+### Policy Layers
 
-**Next Step**
+-   `base_policy` -- Central or baseline lending rules
+-   `state_rules` -- State-specific policies
+-   `sector_rules` -- Sector-specific rules
+-   `environment` -- Environmental or compliance regulations
 
-Borrower PDFs are uploaded in the main ection.
-PDF --> text and concatenated into 1 borrower_text string.. 
-Not stored in Chroma
+### Policy Scope
 
-**LLM Call 1**
+-   State (e.g., Uttarakhand or ALL)
+-   Sector (e.g., warehouse or ALL)
 
-  > Fact extraction into json :
-    > Info extraction + normalization.
-        > id business name
-        > infer turnover figs
-        > pick cashflow trend language
-        > list redflags and missing docs.
+### Versioning
 
-*This step involves no RAG. Its simply the LLM reading case*
-*ie it turns messy text to structured facts*
+-   Effective date / version identifier
 
-**Retrieval( RAG) from Policy**
+Each policy version is:
 
-We now issue a retrieval query.
+-   Chunked into overlapping segments
+-   Embedded using `all-MiniLM-L6-v2`
+-   Stored in ChromaDB under a layer-specific collection
 
-> The qry is embedded into a vector
-> Performs similarity search in ChromaDB and returns top-k policy chunks most similar to the query.
+Collections used:
 
-Thus what **retrieval**does is thatit selects few policy clauses relevant to the task.
-Thus we dont have to dump the whole policy into the prompt.
+    policy_base_policy
+    policy_state_rules
+    policy_sector_rules
+    policy_environment
 
-**This is the R of RAG**
+Only policies marked **ACTIVE** are used during retrieval.
 
-**LLM Call 2**
+------------------------------------------------------------------------
 
- Pass
- > retrieved policy snippets.
- > extracted json.
- > Our instructions to the LLM to use only the snippets ( citing snippet numbers and recommend escallation ( Y/N)
- )
+## 2. Borrower Case Documents
 
- **What LLM does ?**
+Borrower documents are uploaded in the main interface and may include:
 
-  > Maps facts --> Rules --> Decision recommendation.
-  > Produces an explanation with citations.
+-   Bank statement summaries
+-   GST summaries
+-   Financial summaries
+-   Project or compliance documents
 
-**This is the AG of RAG**
+These documents are:
 
-**Importance of RAG in the pipeline**
+-   Parsed into raw text
+-   Concatenated per case
+-   Not stored in the vector database
 
- > constrains the model to our thresholds ( ie if more than 20% mismatch > material discrepancy).
- > Makes the output auditable ( tells us what clause caused which risk flag ).
+They are case-specific and transient.
 
-**LLM Call 3**
+------------------------------------------------------------------------
 
-What is passed :
-   > extraction json.
-   > poicy grounded rationale
+## End-to-End Pipeline
 
-*llm DRafts a memo*
+### Step 1: LLM Fact Extraction (No RAG)
 
-Specifically, LLm performs formating, summarizing,  professional writing.
-Thus it does not decide but creates a draft for the **human in the loop**.
+The LLM reads borrower documents and outputs structured JSON:
 
-**Human in the Loop**
+    {
+      "business_name": "",
+      "loan_amount_requested": null,
+      "annual_turnover": null,
+      "avg_monthly_bank_credits": null,
+      "gst_reported_sales": null,
+      "existing_loan_obligations": {
+        "term_loan_emi": null,
+        "vehicle_loan_emi": null
+      },
+      "cashflow_trend": "improving | stable | declining | null",
+      "red_flags": [],
+      "missing_documents": []
+    }
 
-The analyst ( YOU) decides
-  > to escalate or not.
-  > request missing docs or reject.
-  > override AI if needed.
+This stage:
 
-**Audit logging**
+-   Normalizes messy data
+-   Extracts key financial indicators
+-   Identifies preliminary red flags
+-   Does not apply policy logic
 
-We write metadata _ prompt heads to audit_log.jsonl
+------------------------------------------------------------------------
 
-This gives us 
-> tracability
-> " who saw what "
-> helps in gov narrative.
+### Step 2: Layered Policy Retrieval (RAG)
 
+Based on case context (State and Sector), policy retrieval follows this
+priority order:
 
+1.  (State, Sector)
+2.  (State, ALL)
+3.  (ALL, Sector)
+4.  (ALL, ALL)
 
-# Local Execution
+This retrieval is performed independently across all policy layers:
 
-This prototype req local llm inference and is not yet designed to run on free cloud hosting platforms.
+-   Base policy
+-   State rules
+-   Sector rules
+-   Environmental rules
 
-## Pre-requisites :
+Only ACTIVE policy versions are retrieved.
 
-python 3.10+
-Ollama intalled locally
-Llama 3.2 model pulled via Ollama
+------------------------------------------------------------------------
 
-###Setup
+### Step 3: Policy-Grounded Reasoning (RAG + LLM)
 
-```bash
-pip install -r requirements.txt
-ollama pull llama3.2:latest
-streamlit run app.py
+The LLM receives:
 
+-   Extracted borrower JSON
+-   Retrieved policy snippets (with references)
+-   Explicit instructions to use only retrieved snippets
+
+The model:
+
+-   Maps facts to policy rules
+-   Identifies policy-driven risks
+-   Cites exact policy snippets (e.g., `[BASE-2][STATE-1]`)
+-   Recommends escalation: YES or NO
+
+This produces an auditable, policy-grounded rationale.
+
+------------------------------------------------------------------------
+
+### Step 4: Memo Drafting (LLM Formatting Only)
+
+The LLM drafts a structured pre-screen memo including:
+
+-   Borrower summary
+-   Key risks
+-   Missing documentation
+-   Suggested recommendation
+
+The model does not make final decisions.
+
+------------------------------------------------------------------------
+
+### Step 5: Human-in-the-Loop Decision
+
+The analyst:
+
+-   Reviews extracted facts
+-   Reviews policy-grounded rationale
+-   Decides whether to escalate, hold, or reject
+-   May override AI outputs
+
+The system logs:
+
+-   Model used
+-   Prompt headers
+-   Case context
+-   Policy registry state
+
+------------------------------------------------------------------------
+
+## Governance and Risk Controls
+
+The prototype implements:
+
+-   Versioned policy registry
+-   Draft-to-active promotion workflow
+-   Layer isolation in retrieval
+-   Mandatory policy citation
+-   Human escalation gate
+-   Audit logging
+
+RAG reduces hallucination risk by:
+
+-   Constraining reasoning to retrieved policy snippets
+-   Enforcing citation
+-   Preventing invented policy rules
+
+Human review remains mandatory.
+
+------------------------------------------------------------------------
+
+## Repository Structure
+
+    app.py
+    rag_store.py
+    policy_registry.py
+    chroma_db/
+    policy_registry.json
+    audit_log.jsonl
+    requirements.txt
+
+------------------------------------------------------------------------
+
+## Local Setup and Execution
+
+### Pre-requisites
+
+-   Python 3.10 or higher
+-   Ollama installed locally
+-   Llama 3.2 model pulled via Ollama
+
+### Clone the Repository
+
+    git clone https://github.com/<your-username>/sme-genai-prototype.git
+    cd sme-genai-prototype
+
+### Install Dependencies
+
+    pip install -r requirements.txt
+
+### Pull the LLM Model
+
+    ollama pull llama3.2:latest
+
+### Run the Application
+
+    streamlit run app.py
+
+Open in browser:
+
+    http://localhost:8501
+
+------------------------------------------------------------------------
+
+## Core Design Principle
+
+This is not an LLM demo.
+
+It is a policy-aware regulatory decision-support system combining:
+
+-   Structured extraction
+-   Layered retrieval
+-   Human governance
